@@ -2,6 +2,8 @@
 
 Public Python client for ChemFlow 3D chat editing.
 
+Default public service URL: `https://chemcloud.info`
+
 ## Install
 
 ```bash
@@ -24,10 +26,11 @@ atoms = molecule("H2O")
 updated_atoms, text = chat3d(
     atoms,
     "change the H-O-H angle to 110 degrees",
-    base_url="http://localhost:8000",
     api_key="cfsk_xxx",
 )
 ```
+
+Override `base_url` only when targeting a self-hosted ChemFlow deployment.
 
 ## Stateful Usage
 
@@ -36,7 +39,6 @@ from ase.build import molecule
 from chemflow_client import ChemFlow3DClient
 
 client = ChemFlow3DClient(
-    base_url="http://localhost:8000",
     api_key="cfsk_xxx",
 )
 client.start(molecule("NH3"))
@@ -55,12 +57,13 @@ from chemflow_client import Chat3DWidget
 
 widget = Chat3DWidget(
     molecule("CH4"),
-    base_url="http://localhost:8000",
     api_key="cfsk_xxx",
 )
 display(widget)
 
 latest_atoms = widget.get_atoms()
+selected_atoms = widget.get_selected_atom_indices()
 ```
 
 The widget is a cell output widget, not a full JupyterLab sidebar extension.
+Clicking atoms in the widget toggles selection with a light-yellow highlight similar to the web viewer.

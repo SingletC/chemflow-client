@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from .constants import DEFAULT_BASE_URL
 from .exceptions import ChemFlowConfigurationError, ChemFlowHttpError
 from .types import Chat3DRequest, Chat3DResponse
 
@@ -16,7 +17,7 @@ class ChemFlowApi:
     def __init__(
         self,
         *,
-        base_url: str,
+        base_url: str = DEFAULT_BASE_URL,
         api_key: str,
         timeout: float = 300.0,
         transport: httpx.BaseTransport | None = None,

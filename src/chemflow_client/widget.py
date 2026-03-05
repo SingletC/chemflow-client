@@ -8,6 +8,7 @@ from ase import Atoms
 
 from .ase_adapter import AseAtomsAdapter
 from .client import ChemFlow3DClient
+from .constants import DEFAULT_BASE_URL
 
 try:
     import anywidget
@@ -15,6 +16,31 @@ try:
 except ImportError:  # pragma: no cover - optional dependency path
     anywidget = None
     traitlets = None
+
+
+def _normalize_selected_atom_indices(values: list[int], max_atoms: int) -> list[int]:
+    if max_atoms <= 0:
+        return []
+
+    normalized: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int):
+            continue
+        if value < 0 or value >= max_atoms or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _toggle_selected_atom_index(values: list[int], atom_index: int, max_atoms: int) -> list[int]:
+    normalized = _normalize_selected_atom_indices(values, max_atoms)
+    if atom_index < 0 or atom_index >= max_atoms:
+        return normalized
+    if atom_index in normalized:
+        return [value for value in normalized if value != atom_index]
+    return [*normalized, atom_index]
 
 
 _WIDGET_ESM = r'''
@@ -43,12 +69,85 @@ function parseMessages(rawValue) {
   }
 }
 
+function parseSelectedAtomIndices(rawValue) {
+  try {
+    const values = JSON.parse(rawValue || "[]");
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return values.filter((value) => Number.isInteger(value) && value >= 0);
+  } catch {
+    return [];
+  }
+}
+
 function buildMessageHtml(messages) {
   return messages.map((entry) => {
     const role = entry.role || "assistant";
     const text = entry.text || "";
     return `<div class="cf-msg cf-msg-${role}"><div class="cf-role">${role}</div><div class="cf-text">${text}</div></div>`;
   }).join("");
+}
+
+function readAtomIntegerField(atom, field) {
+  const value = atom?.[field];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
+function resolveAtomIndexFrom3Dmol(atom, maxAtoms) {
+  if (!Number.isInteger(maxAtoms) || maxAtoms <= 0) {
+    return -1;
+  }
+
+  const index = readAtomIntegerField(atom, "index");
+  if (index !== null && index >= 0 && index < maxAtoms) {
+    return index;
+  }
+
+  const serial = readAtomIntegerField(atom, "serial");
+  if (serial === null) {
+    return -1;
+  }
+
+  const oneBased = serial - 1;
+  if (oneBased >= 0 && oneBased < maxAtoms) {
+    return oneBased;
+  }
+
+  const serialBase = atom?.serialBase;
+  const serialIsExplicitZeroBased = serial === 0 || serialBase === 0;
+  if (!serialIsExplicitZeroBased) {
+    return -1;
+  }
+
+  if (serial >= 0 && serial < maxAtoms) {
+    return serial;
+  }
+
+  return -1;
+}
+
+function getAtomCountFromXyz(xyzText) {
+  const firstLine = (xyzText || "").split(/\r?\n/, 1)[0]?.trim() || "";
+  const atomCount = Number.parseInt(firstLine, 10);
+  return Number.isInteger(atomCount) && atomCount > 0 ? atomCount : 0;
+}
+
+function getBaseStyle() {
+  return {
+    stick: { radius: 0.16 },
+    sphere: { scale: 0.28 },
+  };
+}
+
+function getSelectionStyle() {
+  return {
+    stick: { radius: 0.16 },
+    sphere: { scale: 0.35, color: "#fff59d", opacity: 1 },
+  };
 }
 
 function render({ model, el }) {
@@ -61,6 +160,10 @@ function render({ model, el }) {
         .cf-side { display: flex; flex-direction: column; border-left: 1px solid #d8ccb7; }
         .cf-status { padding: 12px 14px; font-size: 13px; letter-spacing: 0.02em; border-bottom: 1px solid #d8ccb7; background: rgba(255,255,255,0.55); }
         .cf-status[data-error="true"] { color: #9d2d20; }
+        .cf-selection { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #d8ccb7; background: rgba(255,255,255,0.42); }
+        .cf-selection-text { font-size: 12px; line-height: 1.4; color: #334047; }
+        .cf-selection-clear { border: 0; border-radius: 999px; padding: 6px 10px; cursor: pointer; background: #d9c7a5; color: #3b2e18; font-size: 12px; }
+        .cf-selection-clear:disabled { cursor: default; opacity: 0.45; }
         .cf-messages { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
         .cf-msg { padding: 10px 12px; border-radius: 12px; border: 1px solid #d7c6ab; background: rgba(255,255,255,0.8); }
         .cf-msg-user { background: #dfe9f3; border-color: #b8cadb; }
@@ -80,6 +183,10 @@ function render({ model, el }) {
         <div class="cf-viewer"></div>
         <div class="cf-side">
           <div class="cf-status"></div>
+          <div class="cf-selection">
+            <div class="cf-selection-text"></div>
+            <button class="cf-selection-clear" type="button">Clear</button>
+          </div>
           <div class="cf-messages"></div>
           <form class="cf-form">
             <input class="cf-input" type="text" placeholder="Describe the structural edit" />
@@ -93,28 +200,53 @@ function render({ model, el }) {
 
   const viewerEl = el.querySelector(".cf-viewer");
   const statusEl = el.querySelector(".cf-status");
+  const selectionEl = el.querySelector(".cf-selection-text");
+  const clearSelectionButton = el.querySelector(".cf-selection-clear");
   const messagesEl = el.querySelector(".cf-messages");
   const formEl = el.querySelector(".cf-form");
   const inputEl = el.querySelector(".cf-input");
   const undoButton = el.querySelector(".cf-button-secondary");
   let viewer = null;
+  let currentModel = null;
+  let currentXyzText = "";
   let disposed = false;
 
-  async function renderViewer() {
+  async function syncViewer() {
     const xyzText = model.get("xyz_text") || "";
     const $3Dmol = await ensure3Dmol();
     if (disposed) {
       return;
     }
+
     if (!viewer) {
       viewer = $3Dmol.createViewer(viewerEl, { backgroundColor: "#f7f2e8" });
     }
-    viewer.clear();
-    if (xyzText.trim()) {
-      viewer.addModel(xyzText, "xyz");
-      viewer.setStyle({}, { stick: { radius: 0.16 }, sphere: { scale: 0.28 } });
-      viewer.zoomTo();
+
+    if (xyzText !== currentXyzText) {
+      currentXyzText = xyzText;
+      currentModel = null;
+      viewer.clear();
+
+      if (xyzText.trim()) {
+        currentModel = viewer.addModel(xyzText, "xyz");
+        viewer.setClickable({}, true, (atom) => {
+          const atomIndex = resolveAtomIndexFrom3Dmol(atom, getAtomCountFromXyz(currentXyzText));
+          if (atomIndex >= 0) {
+            model.send({ type: "toggle_selection", atom_index: atomIndex });
+          }
+        });
+        currentModel.setStyle({}, getBaseStyle());
+        viewer.zoomTo();
+      }
     }
+
+    if (currentModel) {
+      currentModel.setStyle({}, getBaseStyle());
+      parseSelectedAtomIndices(model.get("selected_atom_indices_json")).forEach((index) => {
+        currentModel.setStyle({ index }, getSelectionStyle());
+      });
+    }
+
     viewer.render();
   }
 
@@ -124,11 +256,31 @@ function render({ model, el }) {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function renderSelection() {
+    const selected = parseSelectedAtomIndices(model.get("selected_atom_indices_json"));
+    if (selected.length === 0) {
+      selectionEl.textContent = "Selected atoms: none";
+      clearSelectionButton.disabled = true;
+      return;
+    }
+
+    selectionEl.textContent = `Selected atoms (${selected.length}): ${selected.map((index) => index + 1).join(", ")}`;
+    clearSelectionButton.disabled = false;
+  }
+
   function renderStatus() {
     const errorText = model.get("error_text") || "";
     const statusText = model.get("status_text") || "Ready";
     statusEl.dataset.error = errorText ? "true" : "false";
     statusEl.textContent = errorText || statusText;
+  }
+
+  function handleResize() {
+    if (!viewer) {
+      return;
+    }
+    viewer.resize();
+    viewer.render();
   }
 
   formEl.addEventListener("submit", (event) => {
@@ -145,17 +297,27 @@ function render({ model, el }) {
     model.send({ type: "undo" });
   });
 
-  model.on("change:xyz_text", renderViewer);
+  clearSelectionButton.addEventListener("click", () => {
+    model.send({ type: "clear_selection" });
+  });
+
+  window.addEventListener("resize", handleResize);
+
+  model.on("change:xyz_text", syncViewer);
+  model.on("change:selected_atom_indices_json", syncViewer);
+  model.on("change:selected_atom_indices_json", renderSelection);
   model.on("change:messages_json", renderMessages);
   model.on("change:status_text", renderStatus);
   model.on("change:error_text", renderStatus);
 
-  renderViewer();
+  syncViewer();
+  renderSelection();
   renderMessages();
   renderStatus();
 
   return () => {
     disposed = true;
+    window.removeEventListener("resize", handleResize);
   };
 }
 
@@ -181,12 +343,13 @@ else:
         messages_json = traitlets.Unicode("[]").tag(sync=True)
         status_text = traitlets.Unicode("Ready").tag(sync=True)
         error_text = traitlets.Unicode("").tag(sync=True)
+        selected_atom_indices_json = traitlets.Unicode("[]").tag(sync=True)
 
         def __init__(
             self,
             atoms: Atoms,
             *,
-            base_url: str,
+            base_url: str = DEFAULT_BASE_URL,
             api_key: str,
             model: str | None = None,
             timeout: float = 300.0,
@@ -200,7 +363,9 @@ else:
             )
             self._client.start(atoms)
             self._messages: list[dict[str, str]] = []
+            self._selected_atom_indices: list[int] = []
             self._sync_xyz(self._client.get_atoms())
+            self._sync_selection()
             self.on_msg(self._handle_frontend_message)
 
         def _sync_xyz(self, atoms: Atoms) -> None:
@@ -209,6 +374,9 @@ else:
         def _sync_messages(self) -> None:
             self.messages_json = json.dumps(self._messages)
 
+        def _sync_selection(self) -> None:
+            self.selected_atom_indices_json = json.dumps(self._selected_atom_indices)
+
         def _append_message(self, role: str, text: str) -> None:
             normalized_text = (text or "").strip()
             if not normalized_text:
@@ -216,7 +384,22 @@ else:
             self._messages.append({"role": role, "text": normalized_text})
             self._sync_messages()
 
+        def _clear_selection_state(self) -> None:
+            self._selected_atom_indices = []
+            self._sync_selection()
+
+        def _toggle_selection_state(self, atom_index: int) -> list[int]:
+            atom_count = len(self._client.get_atoms())
+            self._selected_atom_indices = _toggle_selected_atom_index(
+                self._selected_atom_indices,
+                atom_index,
+                atom_count,
+            )
+            self._sync_selection()
+            return self.get_selected_atom_indices()
+
         def _handle_frontend_message(self, _, content, buffers) -> None:
+            del buffers
             message_type = (content or {}).get("type")
             try:
                 if message_type == "chat":
@@ -224,6 +407,13 @@ else:
                     return
                 if message_type == "undo":
                     self.undo()
+                    return
+                if message_type == "toggle_selection":
+                    atom_index = int((content or {}).get("atom_index"))
+                    self._toggle_selection_state(atom_index)
+                    return
+                if message_type == "clear_selection":
+                    self.clear_selection()
                     return
             except Exception as exc:
                 self.status_text = "Error"
@@ -239,22 +429,34 @@ else:
             atoms, text = self._client.chat(normalized_prompt)
             self._append_message("assistant", text)
             self._sync_xyz(atoms)
+            self._clear_selection_state()
             self.status_text = "Ready"
             return self.get_atoms(), text
 
         def set_atoms(self, atoms: Atoms) -> None:
             self._client.set_atoms(atoms)
             self._sync_xyz(self._client.get_atoms())
+            self._clear_selection_state()
             self.error_text = ""
             self.status_text = "Ready"
 
         def get_atoms(self) -> Atoms:
             return self._client.get_atoms()
 
+        def get_selected_atom_indices(self) -> list[int]:
+            return list(self._selected_atom_indices)
+
+        def clear_selection(self) -> list[int]:
+            self._clear_selection_state()
+            self.error_text = ""
+            self.status_text = "Ready"
+            return self.get_selected_atom_indices()
+
         def undo(self) -> Atoms:
             atoms = self._client.undo()
             self._append_message("system", "Reverted to the previous committed structure.")
             self._sync_xyz(atoms)
+            self._clear_selection_state()
             self.error_text = ""
             self.status_text = "Ready"
             return self.get_atoms()

@@ -1,5 +1,6 @@
 from ase import Atoms
 
+from chemflow_client import DEFAULT_BASE_URL
 from chemflow_client.client import ChemFlow3DClient, chat3d
 from chemflow_client.exceptions import ChemFlowStateError
 from chemflow_client.types import AtomsPayload, Chat3DResponse
@@ -93,5 +94,14 @@ def test_undo_requires_previous_committed_structure():
         assert False, "Expected ChemFlowStateError"
     except ChemFlowStateError:
         pass
+    finally:
+        client.close()
+
+
+def test_client_uses_public_default_base_url():
+    client = ChemFlow3DClient(api_key="cfsk_test_key")
+
+    try:
+        assert str(client._api._client.base_url).rstrip("/") == DEFAULT_BASE_URL
     finally:
         client.close()

@@ -8,6 +8,7 @@ from ase import Atoms
 
 from .api import ChemFlowApi
 from .ase_adapter import AseAtomsAdapter
+from .constants import DEFAULT_BASE_URL
 from .exceptions import ChemFlowResponseError, ChemFlowStateError
 from .types import Chat3DRequest
 
@@ -18,7 +19,7 @@ class ChemFlow3DClient:
     def __init__(
         self,
         *,
-        base_url: str,
+        base_url: str = DEFAULT_BASE_URL,
         api_key: str,
         model: str | None = None,
         timeout: float = 300.0,
@@ -105,7 +106,7 @@ def chat3d(
     atoms: Atoms,
     prompt: str,
     *,
-    base_url: str,
+    base_url: str = DEFAULT_BASE_URL,
     api_key: str,
     model: str | None = None,
     timeout: float = 300.0,
