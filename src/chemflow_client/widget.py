@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 
 from ase import Atoms
 
 from .ase_adapter import AseAtomsAdapter
 from .client import ChemFlow3DClient
 from .constants import DEFAULT_BASE_URL
+from .exceptions import ChemFlowError
 
 try:
     import anywidget
@@ -41,6 +44,22 @@ def _toggle_selected_atom_index(values: list[int], atom_index: int, max_atoms: i
     if atom_index in normalized:
         return [value for value in normalized if value != atom_index]
     return [*normalized, atom_index]
+
+
+def _format_widget_error_message(error: Exception | str) -> str:
+    if isinstance(error, str):
+        message = error
+    elif isinstance(error, ChemFlowError):
+        message = getattr(error, "message", "") or str(error)
+    else:
+        message = str(error)
+
+    normalized = (message or "").strip()
+    if normalized:
+        return normalized
+    if isinstance(error, Exception):
+        return error.__class__.__name__
+    return "Request failed"
 
 
 _WIDGET_ESM = r'''
@@ -160,6 +179,10 @@ function render({ model, el }) {
         .cf-side { display: flex; flex-direction: column; border-left: 1px solid #d8ccb7; }
         .cf-status { padding: 12px 14px; font-size: 13px; letter-spacing: 0.02em; border-bottom: 1px solid #d8ccb7; background: rgba(255,255,255,0.55); }
         .cf-status[data-error="true"] { color: #9d2d20; }
+        .cf-waiting { display: none; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #d8ccb7; background: rgba(29,92,99,0.08); color: #1d5c63; }
+        .cf-waiting[data-busy="true"] { display: flex; }
+        .cf-spinner { width: 14px; height: 14px; border-radius: 999px; border: 2px solid rgba(29,92,99,0.18); border-top-color: #1d5c63; animation: cf-spin 0.9s linear infinite; flex: 0 0 auto; }
+        .cf-waiting-text { font-size: 12px; line-height: 1.4; }
         .cf-selection { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #d8ccb7; background: rgba(255,255,255,0.42); }
         .cf-selection-text { font-size: 12px; line-height: 1.4; color: #334047; }
         .cf-selection-clear { border: 0; border-radius: 999px; padding: 6px 10px; cursor: pointer; background: #d9c7a5; color: #3b2e18; font-size: 12px; }
@@ -173,7 +196,12 @@ function render({ model, el }) {
         .cf-form { display: flex; gap: 10px; padding: 14px; border-top: 1px solid #d8ccb7; background: rgba(255,255,255,0.62); }
         .cf-input { flex: 1; border: 1px solid #b8aa91; border-radius: 10px; padding: 10px 12px; background: #fffdf8; }
         .cf-button { border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; background: #1d5c63; color: white; }
+        .cf-button:disabled, .cf-input:disabled { cursor: default; opacity: 0.6; }
         .cf-button-secondary { background: #8c6b3f; }
+        @keyframes cf-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
         @media (max-width: 860px) {
           .cf-grid { grid-template-columns: 1fr; }
           .cf-side { border-left: 0; border-top: 1px solid #d8ccb7; }
@@ -183,6 +211,10 @@ function render({ model, el }) {
         <div class="cf-viewer"></div>
         <div class="cf-side">
           <div class="cf-status"></div>
+          <div class="cf-waiting" data-busy="false">
+            <div class="cf-spinner"></div>
+            <div class="cf-waiting-text"></div>
+          </div>
           <div class="cf-selection">
             <div class="cf-selection-text"></div>
             <button class="cf-selection-clear" type="button">Clear</button>
@@ -190,7 +222,7 @@ function render({ model, el }) {
           <div class="cf-messages"></div>
           <form class="cf-form">
             <input class="cf-input" type="text" placeholder="Describe the structural edit" />
-            <button class="cf-button" type="submit">Send</button>
+            <button class="cf-button cf-button-send" type="submit">Send</button>
             <button class="cf-button cf-button-secondary" type="button">Undo</button>
           </form>
         </div>
@@ -200,15 +232,20 @@ function render({ model, el }) {
 
   const viewerEl = el.querySelector(".cf-viewer");
   const statusEl = el.querySelector(".cf-status");
+  const waitingEl = el.querySelector(".cf-waiting");
+  const waitingTextEl = el.querySelector(".cf-waiting-text");
   const selectionEl = el.querySelector(".cf-selection-text");
   const clearSelectionButton = el.querySelector(".cf-selection-clear");
   const messagesEl = el.querySelector(".cf-messages");
   const formEl = el.querySelector(".cf-form");
   const inputEl = el.querySelector(".cf-input");
+  const sendButton = el.querySelector(".cf-button-send");
   const undoButton = el.querySelector(".cf-button-secondary");
   let viewer = null;
   let currentModel = null;
   let currentXyzText = "";
+  let optimisticBusy = false;
+  let optimisticPrompt = "";
   let disposed = false;
 
   async function syncViewer() {
@@ -258,6 +295,7 @@ function render({ model, el }) {
 
   function renderSelection() {
     const selected = parseSelectedAtomIndices(model.get("selected_atom_indices_json"));
+    const busy = optimisticBusy || Boolean(model.get("busy"));
     if (selected.length === 0) {
       selectionEl.textContent = "Selected atoms: none";
       clearSelectionButton.disabled = true;
@@ -265,7 +303,7 @@ function render({ model, el }) {
     }
 
     selectionEl.textContent = `Selected atoms (${selected.length}): ${selected.map((index) => index + 1).join(", ")}`;
-    clearSelectionButton.disabled = false;
+    clearSelectionButton.disabled = busy;
   }
 
   function renderStatus() {
@@ -273,6 +311,23 @@ function render({ model, el }) {
     const statusText = model.get("status_text") || "Ready";
     statusEl.dataset.error = errorText ? "true" : "false";
     statusEl.textContent = errorText || statusText;
+  }
+
+  function renderBusyState() {
+    const busy = optimisticBusy || Boolean(model.get("busy"));
+    const pendingPrompt = (model.get("pending_prompt") || optimisticPrompt || "").trim();
+
+    inputEl.disabled = busy;
+    sendButton.disabled = busy;
+    sendButton.textContent = busy ? "Waiting..." : "Send";
+    undoButton.disabled = busy;
+
+    waitingEl.dataset.busy = busy ? "true" : "false";
+    waitingTextEl.textContent = pendingPrompt
+      ? `Waiting for ChemFlow response: ${pendingPrompt}`
+      : "Waiting for ChemFlow response...";
+
+    renderSelection();
   }
 
   function handleResize() {
@@ -289,6 +344,9 @@ function render({ model, el }) {
     if (!prompt) {
       return;
     }
+    optimisticBusy = true;
+    optimisticPrompt = prompt;
+    renderBusyState();
     inputEl.value = "";
     model.send({ type: "chat", prompt });
   });
@@ -303,6 +361,15 @@ function render({ model, el }) {
 
   window.addEventListener("resize", handleResize);
 
+  model.on("change:busy", () => {
+    const busy = Boolean(model.get("busy"));
+    optimisticBusy = busy;
+    if (!busy) {
+      optimisticPrompt = "";
+    }
+    renderBusyState();
+  });
+  model.on("change:pending_prompt", renderBusyState);
   model.on("change:xyz_text", syncViewer);
   model.on("change:selected_atom_indices_json", syncViewer);
   model.on("change:selected_atom_indices_json", renderSelection);
@@ -311,6 +378,7 @@ function render({ model, el }) {
   model.on("change:error_text", renderStatus);
 
   syncViewer();
+  renderBusyState();
   renderSelection();
   renderMessages();
   renderStatus();
@@ -343,6 +411,8 @@ else:
         messages_json = traitlets.Unicode("[]").tag(sync=True)
         status_text = traitlets.Unicode("Ready").tag(sync=True)
         error_text = traitlets.Unicode("").tag(sync=True)
+        busy = traitlets.Bool(False).tag(sync=True)
+        pending_prompt = traitlets.Unicode("").tag(sync=True)
         selected_atom_indices_json = traitlets.Unicode("[]").tag(sync=True)
 
         def __init__(
@@ -355,16 +425,25 @@ else:
             timeout: float = 300.0,
         ) -> None:
             super().__init__()
+            self._client_lock = threading.RLock()
+            self._main_thread = threading.current_thread()
+            self._worker_thread: threading.Thread | None = None
+            self._closed = False
+            try:
+                self._main_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._main_loop = None
             self._client = ChemFlow3DClient(
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
                 timeout=timeout,
             )
-            self._client.start(atoms)
+            with self._client_lock:
+                self._client.start(atoms)
             self._messages: list[dict[str, str]] = []
             self._selected_atom_indices: list[int] = []
-            self._sync_xyz(self._client.get_atoms())
+            self._sync_xyz(self.get_atoms())
             self._sync_selection()
             self.on_msg(self._handle_frontend_message)
 
@@ -377,6 +456,38 @@ else:
         def _sync_selection(self) -> None:
             self.selected_atom_indices_json = json.dumps(self._selected_atom_indices)
 
+        def _set_busy_state(self, is_busy: bool, pending_prompt: str = "") -> None:
+            self.busy = bool(is_busy)
+            self.pending_prompt = pending_prompt if is_busy else ""
+
+        def _run_on_main_thread(self, callback) -> None:
+            if self._closed:
+                return
+            if threading.current_thread() is self._main_thread:
+                callback()
+                return
+
+            if self._main_loop is not None:
+                try:
+                    self._main_loop.call_soon_threadsafe(callback)
+                    return
+                except RuntimeError:
+                    pass
+
+            try:
+                from IPython import get_ipython
+
+                ip = get_ipython()
+                kernel = getattr(ip, "kernel", None)
+                io_loop = getattr(kernel, "io_loop", None)
+                if io_loop is not None:
+                    io_loop.add_callback(callback)
+                    return
+            except Exception:
+                pass
+
+            callback()
+
         def _append_message(self, role: str, text: str) -> None:
             normalized_text = (text or "").strip()
             if not normalized_text:
@@ -384,12 +495,29 @@ else:
             self._messages.append({"role": role, "text": normalized_text})
             self._sync_messages()
 
+        def _set_error_state(
+            self,
+            error: Exception | str,
+            *,
+            append_message: bool = True,
+            clear_busy: bool = True,
+            status: str = "Request failed",
+        ) -> str:
+            message = _format_widget_error_message(error)
+            if clear_busy:
+                self._set_busy_state(False)
+            self.status_text = status
+            self.error_text = message
+            if append_message:
+                self._append_message("system", f"Request failed: {message}")
+            return message
+
         def _clear_selection_state(self) -> None:
             self._selected_atom_indices = []
             self._sync_selection()
 
         def _toggle_selection_state(self, atom_index: int) -> list[int]:
-            atom_count = len(self._client.get_atoms())
+            atom_count = len(self.get_atoms())
             self._selected_atom_indices = _toggle_selected_atom_index(
                 self._selected_atom_indices,
                 atom_index,
@@ -398,50 +526,157 @@ else:
             self._sync_selection()
             return self.get_selected_atom_indices()
 
+        def _finalize_background_chat_success(self, atoms: Atoms, text: str) -> None:
+            self._worker_thread = None
+            if self._closed:
+                return
+            self._append_message("assistant", text)
+            self._sync_xyz(atoms)
+            self._clear_selection_state()
+            self._set_busy_state(False)
+            self.error_text = ""
+            self.status_text = "Ready"
+
+        def _finalize_background_chat_error(self, exc: Exception) -> None:
+            self._worker_thread = None
+            if self._closed:
+                return
+            self._set_error_state(exc)
+
+        def _background_chat_worker(self, prompt: str) -> None:
+            try:
+                with self._client_lock:
+                    atoms, text = self._client.chat(prompt)
+            except Exception as exc:
+                self._run_on_main_thread(lambda exc=exc: self._finalize_background_chat_error(exc))
+                return
+
+            self._run_on_main_thread(lambda atoms=atoms, text=text: self._finalize_background_chat_success(atoms, text))
+
+        def chat_async(self, prompt: str, *, raise_errors: bool = False) -> bool:
+            normalized_prompt = (prompt or "").strip()
+            if not normalized_prompt:
+                message = self._set_error_state("prompt is required", append_message=False, clear_busy=False)
+                if raise_errors:
+                    raise ValueError(message)
+                return False
+
+            if self.busy:
+                message = self._set_error_state(
+                    "Another request is already in progress.",
+                    append_message=False,
+                    clear_busy=False,
+                    status="Busy",
+                )
+                if raise_errors:
+                    raise RuntimeError(message)
+                return False
+
+            self.error_text = ""
+            self.status_text = "Waiting for ChemFlow response..."
+            self._set_busy_state(True, normalized_prompt)
+            self._append_message("user", normalized_prompt)
+
+            try:
+                worker = threading.Thread(
+                    target=self._background_chat_worker,
+                    args=(normalized_prompt,),
+                    name="chemflow-widget-chat",
+                    daemon=True,
+                )
+                self._worker_thread = worker
+                worker.start()
+            except Exception as exc:
+                self._worker_thread = None
+                self._set_error_state(exc)
+                if raise_errors:
+                    raise
+                return False
+
+            return True
+
         def _handle_frontend_message(self, _, content, buffers) -> None:
             del buffers
             message_type = (content or {}).get("type")
             try:
                 if message_type == "chat":
-                    self.chat(str((content or {}).get("prompt") or ""))
+                    self.chat_async(str((content or {}).get("prompt") or ""))
                     return
                 if message_type == "undo":
                     self.undo()
                     return
                 if message_type == "toggle_selection":
+                    if self.busy:
+                        return
                     atom_index = int((content or {}).get("atom_index"))
                     self._toggle_selection_state(atom_index)
                     return
                 if message_type == "clear_selection":
+                    if self.busy:
+                        return
                     self.clear_selection()
                     return
             except Exception as exc:
-                self.status_text = "Error"
-                self.error_text = str(exc)
+                self._set_error_state(exc)
 
-        def chat(self, prompt: str) -> tuple[Atoms, str]:
+        def chat(self, prompt: str, *, raise_errors: bool = False) -> tuple[Atoms, str]:
             normalized_prompt = (prompt or "").strip()
             if not normalized_prompt:
-                raise ValueError("prompt is required")
+                message = self._set_error_state("prompt is required", append_message=False, clear_busy=False)
+                if raise_errors:
+                    raise ValueError(message)
+                return self.get_atoms(), ""
+            if self.busy:
+                message = self._set_error_state(
+                    "Another request is already in progress.",
+                    append_message=False,
+                    clear_busy=False,
+                    status="Busy",
+                )
+                if raise_errors:
+                    raise RuntimeError(message)
+                return self.get_atoms(), ""
             self.error_text = ""
-            self.status_text = "Running..."
+            self.status_text = "Waiting for ChemFlow response..."
+            self._set_busy_state(True, normalized_prompt)
             self._append_message("user", normalized_prompt)
-            atoms, text = self._client.chat(normalized_prompt)
+
+            try:
+                with self._client_lock:
+                    atoms, text = self._client.chat(normalized_prompt)
+            except Exception as exc:
+                self._set_error_state(exc)
+                if raise_errors:
+                    raise
+                return self.get_atoms(), ""
+
             self._append_message("assistant", text)
             self._sync_xyz(atoms)
             self._clear_selection_state()
+            self._set_busy_state(False)
             self.status_text = "Ready"
             return self.get_atoms(), text
 
         def set_atoms(self, atoms: Atoms) -> None:
-            self._client.set_atoms(atoms)
-            self._sync_xyz(self._client.get_atoms())
+            if self.busy:
+                self._set_error_state(
+                    "Cannot replace atoms while a request is in progress.",
+                    append_message=False,
+                    clear_busy=False,
+                    status="Busy",
+                )
+                return
+            with self._client_lock:
+                self._client.set_atoms(atoms)
+                current_atoms = self._client.get_atoms()
+            self._sync_xyz(current_atoms)
             self._clear_selection_state()
             self.error_text = ""
             self.status_text = "Ready"
 
         def get_atoms(self) -> Atoms:
-            return self._client.get_atoms()
+            with self._client_lock:
+                return self._client.get_atoms()
 
         def get_selected_atom_indices(self) -> list[int]:
             return list(self._selected_atom_indices)
@@ -452,8 +687,27 @@ else:
             self.status_text = "Ready"
             return self.get_selected_atom_indices()
 
-        def undo(self) -> Atoms:
-            atoms = self._client.undo()
+        def undo(self, *, raise_errors: bool = False) -> Atoms:
+            if self.busy:
+                message = self._set_error_state(
+                    "Another request is already in progress.",
+                    append_message=False,
+                    clear_busy=False,
+                    status="Busy",
+                )
+                if raise_errors:
+                    raise RuntimeError(message)
+                return self.get_atoms()
+
+            try:
+                with self._client_lock:
+                    atoms = self._client.undo()
+            except Exception as exc:
+                self._set_error_state(exc)
+                if raise_errors:
+                    raise
+                return self.get_atoms()
+
             self._append_message("system", "Reverted to the previous committed structure.")
             self._sync_xyz(atoms)
             self._clear_selection_state()
@@ -462,4 +716,6 @@ else:
             return self.get_atoms()
 
         def close(self) -> None:
-            self._client.close()
+            self._closed = True
+            with self._client_lock:
+                self._client.close()

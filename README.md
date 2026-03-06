@@ -63,7 +63,13 @@ display(widget)
 
 latest_atoms = widget.get_atoms()
 selected_atoms = widget.get_selected_atom_indices()
+
+# Start a background request and keep using the notebook.
+widget.chat_async("rotate one hydrogen slightly outward")
 ```
 
 The widget is a cell output widget, not a full JupyterLab sidebar extension.
 Clicking atoms in the widget toggles selection with a light-yellow highlight similar to the web viewer.
+During `Send`, the widget now submits in the background, shows an explicit waiting state, and disables interactive controls until the response returns.
+`widget.chat_async(...)` schedules the same background workflow from Python code and returns immediately.
+Notebook-triggered request failures are surfaced in the widget status/message area instead of raising by default. Pass `raise_errors=True` to `widget.chat(...)` or `widget.undo(...)` if you need Python exceptions.
