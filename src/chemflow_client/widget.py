@@ -573,12 +573,20 @@ else:
         def _background_chat_worker(self, prompt: str) -> None:
             try:
                 with self._client_lock:
-                    atoms, text = self._client.chat(prompt)
+                    prepared_chat = self._client._prepare_chat(prompt)
+                response = self._client._api.chat3d(prepared_chat.request)
+                with self._client_lock:
+                    if self._closed:
+                        self._worker_thread = None
+                        return
+                    atoms, text = self._client._apply_chat_response(prepared_chat, response)
             except Exception as exc:
                 self._run_on_main_thread(lambda exc=exc: self._finalize_background_chat_error(exc))
                 return
 
-            self._run_on_main_thread(lambda atoms=atoms, text=text: self._finalize_background_chat_success(atoms, text))
+            self._run_on_main_thread(
+                lambda atoms=atoms, text=text: self._finalize_background_chat_success(atoms, text)
+            )
 
         def chat_async(self, prompt: str, *, raise_errors: bool = False) -> bool:
             normalized_prompt = (prompt or "").strip()

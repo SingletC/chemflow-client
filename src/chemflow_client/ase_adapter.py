@@ -16,8 +16,6 @@ class AseAtomsAdapter:
 
     @staticmethod
     def to_payload(atoms: Atoms) -> AtomsPayload:
-        if len(atoms) == 0:
-            return AtomsPayload(symbols=[], positions=[])
         tags = None
         masses = None
         try:
@@ -27,6 +25,10 @@ class AseAtomsAdapter:
         try:
             masses = atoms.get_masses().tolist()
         except Exception:
+            masses = None
+        if tags == []:
+            tags = None
+        if masses == []:
             masses = None
         cell = atoms.get_cell().array.tolist() if atoms.get_cell() is not None else None
         pbc = atoms.get_pbc().tolist() if atoms.get_pbc() is not None else None

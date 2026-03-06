@@ -12,6 +12,7 @@ traitlets = pytest.importorskip("traitlets", reason="widget tests require notebo
 
 from chemflow_client import CHEMFLOW_API_KEY_ENV_VAR, CHEMFLOW_BASE_URL_ENV_VAR
 from chemflow_client.exceptions import ChemFlowHttpError
+from chemflow_client.types import AtomsPayload, Chat3DResponse
 from chemflow_client.widget import (
     _WIDGET_ESM,
     _format_widget_error_message,
@@ -125,14 +126,20 @@ def test_widget_chat_async_returns_immediately_and_applies_result(monkeypatch):
     started = threading.Event()
     release = threading.Event()
 
-    def fake_chat(_prompt):
+    def fake_chat3d(_request):
         started.set()
         release.wait(1.0)
-        updated = Atoms(symbols=["He"], positions=[[1.5, 0.0, 0.0]])
-        widget._client._atoms = updated.copy()
-        return updated, "Applied asynchronously."
+        return Chat3DResponse(
+            session_id="sess-1",
+            assistant_message="Applied asynchronously.",
+            atoms=AtomsPayload(
+                symbols=["He"],
+                positions=[[1.5, 0.0, 0.0]],
+            ),
+            changed=True,
+        )
 
-    monkeypatch.setattr(widget._client, "chat", fake_chat)
+    monkeypatch.setattr(widget._client._api, "chat3d", fake_chat3d)
 
     scheduled = widget.chat_async("move it async")
 
@@ -150,6 +157,54 @@ def test_widget_chat_async_returns_immediately_and_applies_result(monkeypatch):
     assert widget.pending_prompt == ""
     assert widget.status_text == "Ready"
     assert "Applied asynchronously." in widget.messages_json
+
+
+def test_widget_chat_async_keeps_state_reads_and_close_responsive(monkeypatch):
+    widget_module = _reload_widget_module_with_fake_anywidget(monkeypatch)
+    widget = widget_module.Chat3DWidget(
+        Atoms(symbols=["He"], positions=[[0.0, 0.0, 0.0]]),
+        api_key="cfsk_test_key",
+    )
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_chat3d(_request):
+        started.set()
+        release.wait(1.0)
+        return Chat3DResponse(
+            session_id="sess-2",
+            assistant_message="Applied asynchronously.",
+            atoms=AtomsPayload(
+                symbols=["He"],
+                positions=[[2.0, 0.0, 0.0]],
+            ),
+            changed=True,
+        )
+
+    monkeypatch.setattr(widget._client._api, "chat3d", fake_chat3d)
+
+    assert widget.chat_async("move it async") is True
+    assert started.wait(0.2)
+
+    read_started = time.perf_counter()
+    atoms = widget.get_atoms()
+    read_elapsed = time.perf_counter() - read_started
+
+    close_started = time.perf_counter()
+    widget.close()
+    close_elapsed = time.perf_counter() - close_started
+
+    assert atoms.get_chemical_symbols() == ["He"]
+    assert read_elapsed < 0.1
+    assert close_elapsed < 0.1
+
+    release.set()
+    deadline = time.time() + 1.0
+    while widget._worker_thread is not None and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert widget._worker_thread is None
 
 
 def test_widget_can_initialize_empty_workspace(monkeypatch):

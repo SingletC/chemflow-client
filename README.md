@@ -59,7 +59,6 @@ widget.get_atoms()
 
 ![JupyterLab widget demo](docs/assets/chemflow-widget-demo.gif)
 
-If you install notebook extras into an already running Jupyter session, restart the kernel before creating the widget.
 
 ## Configure
 

@@ -14,7 +14,9 @@ concurrency:
 
 jobs:
     codex-review:
-        if: github.event.pull_request.draft == false
+        if: >-
+            github.event.pull_request.draft == false &&
+            github.event.pull_request.head.repo.full_name == github.repository
         runs-on: [self-hosted, chemflow]
         timeout-minutes: 20
 
