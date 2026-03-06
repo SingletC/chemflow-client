@@ -4,6 +4,11 @@ All notable changes to `chemflow-client` will be documented in this file.
 
 ## Unreleased
 
+## 0.1.3
+
+- Updated the README notebook widget image to use the GitHub-hosted URL so the animation renders correctly on PyPI.
+- Simplified the notebook widget assistant placeholder text from `Thinking harder...` to `Thinking...`.
+
 ## 0.1.2
 
 - Published the client and widget improvements that were previously tagged but not released to PyPI because of a package-version mismatch.

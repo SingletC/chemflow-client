@@ -42,7 +42,7 @@ def test_format_widget_error_message_prefers_structured_message():
 
 
 def test_widget_esm_uses_chat_thinking_placeholder_instead_of_waiting_banner():
-    assert "Thinking harder..." in _WIDGET_ESM
+    assert "Thinking..." in _WIDGET_ESM
     assert "Waiting for ChemFlow response:" not in _WIDGET_ESM
 
 
