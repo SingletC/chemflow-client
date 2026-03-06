@@ -57,7 +57,7 @@ widget
 widget.get_atoms()
 ```
 
-![JupyterLab widget demo](https://github.com/SingletC/chemflow-client/blob/main/docs/assets/chemflow-widget-demo.gif)
+![JupyterLab widget demo](https://raw.githubusercontent.com/SingletC/chemflow-client/v0.1.4/docs/assets/chemflow-widget-demo.gif)
 
 
 ## Configure
