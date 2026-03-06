@@ -8,7 +8,6 @@ from ase import Atoms
 
 from .api import ChemFlowApi
 from .ase_adapter import AseAtomsAdapter
-from .constants import DEFAULT_BASE_URL
 from .exceptions import ChemFlowResponseError, ChemFlowStateError
 from .types import Chat3DRequest
 
@@ -19,8 +18,8 @@ class ChemFlow3DClient:
     def __init__(
         self,
         *,
-        base_url: str = DEFAULT_BASE_URL,
-        api_key: str,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         model: Optional[str] = None,
         timeout: float = 300.0,
     ) -> None:
@@ -35,8 +34,9 @@ class ChemFlow3DClient:
     def session_id(self) -> Optional[str]:
         return self._session_id
 
-    def start(self, atoms: Atoms) -> None:
-        self._atoms = AseAtomsAdapter.copy_atoms(atoms)
+    def start(self, atoms: Optional[Atoms] = None) -> None:
+        """Start a session from an existing structure or an empty workspace."""
+        self._atoms = AseAtomsAdapter.copy_atoms(atoms) if atoms is not None else Atoms()
         self._previous_atoms = None
         self._session_id = None
         self._needs_sync = False
@@ -103,15 +103,15 @@ class ChemFlow3DClient:
 
 
 def chat3d(
-    atoms: Atoms,
+    atoms: Optional[Atoms],
     prompt: str,
     *,
-    base_url: str = DEFAULT_BASE_URL,
-    api_key: str,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
     model: Optional[str] = None,
     timeout: float = 300.0,
 ) -> Tuple[Atoms, str]:
-    """Run a one-shot 3D chat edit and return updated atoms plus assistant text."""
+    """Run a one-shot 3D chat edit from existing atoms or an empty workspace."""
     with ChemFlow3DClient(
         base_url=base_url,
         api_key=api_key,

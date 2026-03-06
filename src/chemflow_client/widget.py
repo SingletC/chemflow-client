@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from typing import Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 from ase import Atoms
 
 from .ase_adapter import AseAtomsAdapter
 from .client import ChemFlow3DClient
-from .constants import DEFAULT_BASE_URL
 from .exceptions import ChemFlowError
 
 try:
@@ -65,6 +64,7 @@ def _format_widget_error_message(error: Union[Exception, str]) -> str:
 
 _WIDGET_ESM = r'''
 const THREE_DMOL_URL = "https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js";
+const THINKING_PLACEHOLDER = "Thinking harder...";
 
 async function ensure3Dmol() {
   if (window.$3Dmol) {
@@ -101,12 +101,27 @@ function parseSelectedAtomIndices(rawValue) {
   }
 }
 
-function buildMessageHtml(messages) {
-  return messages.map((entry) => {
-    const role = entry.role || "assistant";
-    const text = entry.text || "";
-    return `<div class="cf-msg cf-msg-${role}"><div class="cf-role">${role}</div><div class="cf-text">${text}</div></div>`;
-  }).join("");
+function normalizeMessageRole(role) {
+  if (role === "user" || role === "system" || role === "assistant") {
+    return role;
+  }
+  return "assistant";
+}
+
+function buildDisplayMessages(model, optimisticBusy) {
+  const messages = parseMessages(model.get("messages_json"));
+  const busy = optimisticBusy || Boolean(model.get("busy"));
+  if (!busy) {
+    return messages;
+  }
+  return [
+    ...messages,
+    {
+      role: "assistant",
+      text: THINKING_PLACEHOLDER,
+      thinking: true,
+    },
+  ];
 }
 
 function readAtomIntegerField(atom, field) {
@@ -174,24 +189,21 @@ function render({ model, el }) {
   el.innerHTML = `
     <div class="cf-shell">
       <style>
-        .cf-shell { font-family: Georgia, serif; color: #192126; background: linear-gradient(180deg, #f8f5ee, #efe8da); border: 1px solid #c8bba6; border-radius: 18px; overflow: hidden; }
-        .cf-grid { display: grid; grid-template-columns: minmax(320px, 1.3fr) minmax(280px, 1fr); min-height: 420px; }
-        .cf-viewer { min-height: 420px; background: radial-gradient(circle at top, #ffffff, #ece4d5); }
-        .cf-side { display: flex; flex-direction: column; border-left: 1px solid #d8ccb7; }
+        .cf-shell { font-family: Georgia, serif; color: #192126; background: linear-gradient(180deg, #f8f5ee, #efe8da); border: 1px solid #c8bba6; border-radius: 18px; overflow: hidden; min-height: 420px; height: min(720px, 78vh); }
+        .cf-grid { display: grid; grid-template-columns: minmax(320px, 1.3fr) minmax(280px, 1fr); height: 100%; min-height: 0; }
+        .cf-viewer { min-height: 0; height: 100%; background: radial-gradient(circle at top, #ffffff, #ece4d5); }
+        .cf-side { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid #d8ccb7; }
         .cf-status { padding: 12px 14px; font-size: 13px; letter-spacing: 0.02em; border-bottom: 1px solid #d8ccb7; background: rgba(255,255,255,0.55); }
         .cf-status[data-error="true"] { color: #9d2d20; }
-        .cf-waiting { display: none; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #d8ccb7; background: rgba(29,92,99,0.08); color: #1d5c63; }
-        .cf-waiting[data-busy="true"] { display: flex; }
-        .cf-spinner { width: 14px; height: 14px; border-radius: 999px; border: 2px solid rgba(29,92,99,0.18); border-top-color: #1d5c63; animation: cf-spin 0.9s linear infinite; flex: 0 0 auto; }
-        .cf-waiting-text { font-size: 12px; line-height: 1.4; }
         .cf-selection { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #d8ccb7; background: rgba(255,255,255,0.42); }
         .cf-selection-text { font-size: 12px; line-height: 1.4; color: #334047; }
         .cf-selection-clear { border: 0; border-radius: 999px; padding: 6px 10px; cursor: pointer; background: #d9c7a5; color: #3b2e18; font-size: 12px; }
         .cf-selection-clear:disabled { cursor: default; opacity: 0.45; }
-        .cf-messages { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+        .cf-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
         .cf-msg { padding: 10px 12px; border-radius: 12px; border: 1px solid #d7c6ab; background: rgba(255,255,255,0.8); }
         .cf-msg-user { background: #dfe9f3; border-color: #b8cadb; }
         .cf-msg-system { background: #efe6d6; border-color: #d8c8ad; }
+        .cf-msg-thinking { font-style: italic; opacity: 0.75; }
         .cf-role { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; margin-bottom: 4px; }
         .cf-text { white-space: pre-wrap; line-height: 1.4; }
         .cf-form { display: flex; gap: 10px; padding: 14px; border-top: 1px solid #d8ccb7; background: rgba(255,255,255,0.62); }
@@ -199,12 +211,9 @@ function render({ model, el }) {
         .cf-button { border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; background: #1d5c63; color: white; }
         .cf-button:disabled, .cf-input:disabled { cursor: default; opacity: 0.6; }
         .cf-button-secondary { background: #8c6b3f; }
-        @keyframes cf-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
         @media (max-width: 860px) {
-          .cf-grid { grid-template-columns: 1fr; }
+          .cf-shell { height: min(780px, 88vh); }
+          .cf-grid { grid-template-columns: 1fr; grid-template-rows: minmax(240px, 1fr) minmax(0, 1fr); }
           .cf-side { border-left: 0; border-top: 1px solid #d8ccb7; }
         }
       </style>
@@ -212,17 +221,13 @@ function render({ model, el }) {
         <div class="cf-viewer"></div>
         <div class="cf-side">
           <div class="cf-status"></div>
-          <div class="cf-waiting" data-busy="false">
-            <div class="cf-spinner"></div>
-            <div class="cf-waiting-text"></div>
-          </div>
           <div class="cf-selection">
             <div class="cf-selection-text"></div>
             <button class="cf-selection-clear" type="button">Clear</button>
           </div>
           <div class="cf-messages"></div>
           <form class="cf-form">
-            <input class="cf-input" type="text" placeholder="Describe the structural edit" />
+            <input class="cf-input" type="text" placeholder="Describe the structure or edit" />
             <button class="cf-button cf-button-send" type="submit">Send</button>
             <button class="cf-button cf-button-secondary" type="button">Undo</button>
           </form>
@@ -233,8 +238,6 @@ function render({ model, el }) {
 
   const viewerEl = el.querySelector(".cf-viewer");
   const statusEl = el.querySelector(".cf-status");
-  const waitingEl = el.querySelector(".cf-waiting");
-  const waitingTextEl = el.querySelector(".cf-waiting-text");
   const selectionEl = el.querySelector(".cf-selection-text");
   const clearSelectionButton = el.querySelector(".cf-selection-clear");
   const messagesEl = el.querySelector(".cf-messages");
@@ -289,8 +292,29 @@ function render({ model, el }) {
   }
 
   function renderMessages() {
-    const messages = parseMessages(model.get("messages_json"));
-    messagesEl.innerHTML = buildMessageHtml(messages);
+    const messages = buildDisplayMessages(model, optimisticBusy);
+    const fragment = document.createDocumentFragment();
+    messages.forEach((entry) => {
+      const role = normalizeMessageRole(entry.role);
+      const text = String(entry.text || "");
+      const messageEl = document.createElement("div");
+      messageEl.className = `cf-msg cf-msg-${role}`;
+      if (entry.thinking) {
+        messageEl.classList.add("cf-msg-thinking");
+      }
+
+      const roleEl = document.createElement("div");
+      roleEl.className = "cf-role";
+      roleEl.textContent = role;
+
+      const textEl = document.createElement("div");
+      textEl.className = "cf-text";
+      textEl.textContent = text;
+
+      messageEl.append(roleEl, textEl);
+      fragment.appendChild(messageEl);
+    });
+    messagesEl.replaceChildren(fragment);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
@@ -316,19 +340,14 @@ function render({ model, el }) {
 
   function renderBusyState() {
     const busy = optimisticBusy || Boolean(model.get("busy"));
-    const pendingPrompt = (model.get("pending_prompt") || optimisticPrompt || "").trim();
 
     inputEl.disabled = busy;
     sendButton.disabled = busy;
-    sendButton.textContent = busy ? "Waiting..." : "Send";
+    sendButton.textContent = "Send";
     undoButton.disabled = busy;
 
-    waitingEl.dataset.busy = busy ? "true" : "false";
-    waitingTextEl.textContent = pendingPrompt
-      ? `Waiting for ChemFlow response: ${pendingPrompt}`
-      : "Waiting for ChemFlow response...";
-
     renderSelection();
+    renderMessages();
   }
 
   function handleResize() {
@@ -418,10 +437,10 @@ else:
 
         def __init__(
             self,
-            atoms: Atoms,
+            atoms: Optional[Atoms] = None,
             *,
-            base_url: str = DEFAULT_BASE_URL,
-            api_key: str,
+            base_url: Optional[str] = None,
+            api_key: Optional[str] = None,
             model: Optional[str] = None,
             timeout: float = 300.0,
         ) -> None:
@@ -434,6 +453,7 @@ else:
                 self._main_loop = asyncio.get_running_loop()
             except RuntimeError:
                 self._main_loop = None
+            self._kernel_io_loop = self._resolve_kernel_io_loop()
             self._client = ChemFlow3DClient(
                 base_url=base_url,
                 api_key=api_key,
@@ -461,7 +481,18 @@ else:
             self.busy = bool(is_busy)
             self.pending_prompt = pending_prompt if is_busy else ""
 
-        def _run_on_main_thread(self, callback) -> None:
+        @staticmethod
+        def _resolve_kernel_io_loop() -> Optional[Any]:
+            try:
+                from IPython import get_ipython
+
+                ip = get_ipython()
+            except Exception:
+                return None
+            kernel = getattr(ip, "kernel", None)
+            return getattr(kernel, "io_loop", None)
+
+        def _run_on_main_thread(self, callback: Callable[[], None]) -> None:
             if self._closed:
                 return
             if threading.current_thread() is self._main_thread:
@@ -475,17 +506,12 @@ else:
                 except RuntimeError:
                     pass
 
-            try:
-                from IPython import get_ipython
-
-                ip = get_ipython()
-                kernel = getattr(ip, "kernel", None)
-                io_loop = getattr(kernel, "io_loop", None)
-                if io_loop is not None:
-                    io_loop.add_callback(callback)
+            if self._kernel_io_loop is not None:
+                try:
+                    self._kernel_io_loop.add_callback(callback)
                     return
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
             callback()
 
@@ -574,7 +600,7 @@ else:
                 return False
 
             self.error_text = ""
-            self.status_text = "Waiting for ChemFlow response..."
+            self.status_text = "Working..."
             self._set_busy_state(True, normalized_prompt)
             self._append_message("user", normalized_prompt)
 
@@ -638,7 +664,7 @@ else:
                     raise RuntimeError(message)
                 return self.get_atoms(), ""
             self.error_text = ""
-            self.status_text = "Waiting for ChemFlow response..."
+            self.status_text = "Working..."
             self._set_busy_state(True, normalized_prompt)
             self._append_message("user", normalized_prompt)
 

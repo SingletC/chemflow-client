@@ -1,7 +1,7 @@
 """Public ChemFlow Python client."""
 
 from .client import ChemFlow3DClient, chat3d
-from .constants import DEFAULT_BASE_URL
+from .constants import CHEMFLOW_API_KEY_ENV_VAR, CHEMFLOW_BASE_URL_ENV_VAR, DEFAULT_BASE_URL
 from .exceptions import (
     ChemFlowConfigurationError,
     ChemFlowError,
@@ -16,6 +16,8 @@ __all__ = [
     "ChemFlow3DClient",
     "Chat3DWidget",
     "DEFAULT_BASE_URL",
+    "CHEMFLOW_BASE_URL_ENV_VAR",
+    "CHEMFLOW_API_KEY_ENV_VAR",
     "ChemFlowError",
     "ChemFlowConfigurationError",
     "ChemFlowHttpError",

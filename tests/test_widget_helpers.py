@@ -6,11 +6,14 @@ import time
 import types
 
 import pytest
-import traitlets
 from ase import Atoms
 
+traitlets = pytest.importorskip("traitlets", reason="widget tests require notebook extras")
+
+from chemflow_client import CHEMFLOW_API_KEY_ENV_VAR, CHEMFLOW_BASE_URL_ENV_VAR
 from chemflow_client.exceptions import ChemFlowHttpError
 from chemflow_client.widget import (
+    _WIDGET_ESM,
     _format_widget_error_message,
     _normalize_selected_atom_indices,
     _toggle_selected_atom_index,
@@ -35,6 +38,24 @@ def test_format_widget_error_message_prefers_structured_message():
     error = ChemFlowHttpError(502, "upstream timeout")
 
     assert _format_widget_error_message(error) == "upstream timeout"
+
+
+def test_widget_esm_uses_chat_thinking_placeholder_instead_of_waiting_banner():
+    assert "Thinking harder..." in _WIDGET_ESM
+    assert "Waiting for ChemFlow response:" not in _WIDGET_ESM
+
+
+def test_widget_esm_keeps_fixed_shell_height_and_scrollable_message_area():
+    assert 'height: min(720px, 78vh);' in _WIDGET_ESM
+    assert 'overflow-y: auto;' in _WIDGET_ESM
+    assert 'min-height: 0;' in _WIDGET_ESM
+
+
+def test_widget_esm_renders_messages_via_text_nodes_instead_of_inner_html():
+    assert "textEl.textContent = text;" in _WIDGET_ESM
+    assert "roleEl.textContent = role;" in _WIDGET_ESM
+    assert "messagesEl.replaceChildren(fragment);" in _WIDGET_ESM
+    assert "messagesEl.innerHTML = buildMessageHtml(messages);" not in _WIDGET_ESM
 
 
 def _reload_widget_module_with_fake_anywidget(monkeypatch):
@@ -129,3 +150,83 @@ def test_widget_chat_async_returns_immediately_and_applies_result(monkeypatch):
     assert widget.pending_prompt == ""
     assert widget.status_text == "Ready"
     assert "Applied asynchronously." in widget.messages_json
+
+
+def test_widget_can_initialize_empty_workspace(monkeypatch):
+    widget_module = _reload_widget_module_with_fake_anywidget(monkeypatch)
+    widget = widget_module.Chat3DWidget(api_key="cfsk_test_key")
+
+    try:
+        assert len(widget.get_atoms()) == 0
+        assert widget.xyz_text == ""
+        assert widget.status_text == "Ready"
+    finally:
+        widget.close()
+
+
+def test_widget_can_generate_from_empty_workspace(monkeypatch):
+    widget_module = _reload_widget_module_with_fake_anywidget(monkeypatch)
+    widget = widget_module.Chat3DWidget(api_key="cfsk_test_key")
+
+    def fake_chat(_prompt):
+        updated = Atoms(symbols=["He"], positions=[[0.0, 0.0, 0.0]])
+        widget._client._atoms = updated.copy()
+        return updated, "Generated helium."
+
+    monkeypatch.setattr(widget._client, "chat", fake_chat)
+
+    atoms, text = widget.chat("generate helium")
+
+    try:
+        assert atoms.get_chemical_symbols() == ["He"]
+        assert text == "Generated helium."
+        assert widget.xyz_text.startswith("1\nChemFlow Client\nHe ")
+    finally:
+        widget.close()
+
+
+def test_widget_can_resolve_configuration_from_environment(monkeypatch):
+    widget_module = _reload_widget_module_with_fake_anywidget(monkeypatch)
+    monkeypatch.setenv(CHEMFLOW_API_KEY_ENV_VAR, "cfsk_env_key")
+    monkeypatch.setenv(CHEMFLOW_BASE_URL_ENV_VAR, "http://env.example:8000/")
+
+    widget = widget_module.Chat3DWidget(Atoms(symbols=["He"], positions=[[0.0, 0.0, 0.0]]))
+
+    try:
+        assert str(widget._client._api._client.base_url).rstrip("/") == "http://env.example:8000"
+        assert widget._client._api._client.headers["X-ChemFlow-Api-Key"] == "cfsk_env_key"
+    finally:
+        widget.close()
+
+
+def test_widget_run_on_main_thread_uses_stored_kernel_io_loop(monkeypatch):
+    widget_module = _reload_widget_module_with_fake_anywidget(monkeypatch)
+    widget = widget_module.Chat3DWidget(
+        Atoms(symbols=["He"], positions=[[0.0, 0.0, 0.0]]),
+        api_key="cfsk_test_key",
+    )
+
+    callbacks = []
+    invoked = []
+
+    class FakeIOLoop:
+        def add_callback(self, callback):
+            callbacks.append(callback)
+
+    widget._main_loop = None
+    widget._kernel_io_loop = FakeIOLoop()
+
+    worker = threading.Thread(
+        target=lambda: widget._run_on_main_thread(lambda: invoked.append("done")),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=1.0)
+
+    assert invoked == []
+    assert len(callbacks) == 1
+
+    callbacks[0]()
+    assert invoked == ["done"]
+
+    widget.close()

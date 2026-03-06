@@ -16,6 +16,8 @@ class AseAtomsAdapter:
 
     @staticmethod
     def to_payload(atoms: Atoms) -> AtomsPayload:
+        if len(atoms) == 0:
+            return AtomsPayload(symbols=[], positions=[])
         tags = None
         masses = None
         try:
@@ -53,6 +55,8 @@ class AseAtomsAdapter:
 
     @staticmethod
     def to_xyz_text(atoms: Atoms) -> str:
+        if len(atoms) == 0:
+            return ""
         lines = [str(len(atoms)), "ChemFlow Client"]
         for symbol, position in zip(atoms.get_chemical_symbols(), atoms.get_positions()):
             lines.append(

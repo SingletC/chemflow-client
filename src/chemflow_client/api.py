@@ -6,8 +6,8 @@ from typing import Any, Optional
 
 import httpx
 
-from .constants import DEFAULT_BASE_URL
-from .exceptions import ChemFlowConfigurationError, ChemFlowHttpError
+from .config import resolve_api_key, resolve_base_url
+from .exceptions import ChemFlowHttpError
 from .types import Chat3DRequest, Chat3DResponse
 
 
@@ -17,22 +17,19 @@ class ChemFlowApi:
     def __init__(
         self,
         *,
-        base_url: str = DEFAULT_BASE_URL,
-        api_key: str,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         timeout: float = 300.0,
         transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
-        normalized_base_url = (base_url or "").strip().rstrip("/")
-        if not normalized_base_url:
-            raise ChemFlowConfigurationError("base_url is required")
-        if not api_key:
-            raise ChemFlowConfigurationError("api_key is required")
+        normalized_base_url = resolve_base_url(base_url)
+        resolved_api_key = resolve_api_key(api_key)
         self._client = httpx.Client(
             base_url=normalized_base_url,
             timeout=timeout,
             transport=transport,
             headers={
-                "X-ChemFlow-Api-Key": api_key,
+                "X-ChemFlow-Api-Key": resolved_api_key,
                 "User-Agent": "chemflow-client/0.1.0",
                 "Accept": "application/json",
             },
