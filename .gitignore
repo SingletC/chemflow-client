@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 *.so
 .pytest_cache/
+.ipynb_checkpoints/
+.playwright-cli/
 .venv/
 .venv*/
 dist/
@@ -9,5 +11,7 @@ build/
 *.egg-info/
 .coverage
 htmlcov/
+output/
+Untitled*.ipynb
 .DS_Store
 AGENTS.md

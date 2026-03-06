@@ -26,6 +26,10 @@ class AseAtomsAdapter:
             masses = atoms.get_masses().tolist()
         except Exception:
             masses = None
+        if tags == []:
+            tags = None
+        if masses == []:
+            masses = None
         cell = atoms.get_cell().array.tolist() if atoms.get_cell() is not None else None
         pbc = atoms.get_pbc().tolist() if atoms.get_pbc() is not None else None
         return AtomsPayload(
@@ -53,6 +57,8 @@ class AseAtomsAdapter:
 
     @staticmethod
     def to_xyz_text(atoms: Atoms) -> str:
+        if len(atoms) == 0:
+            return ""
         lines = [str(len(atoms)), "ChemFlow Client"]
         for symbol, position in zip(atoms.get_chemical_symbols(), atoms.get_positions()):
             lines.append(

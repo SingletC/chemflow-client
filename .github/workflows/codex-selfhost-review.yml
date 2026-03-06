@@ -1,0 +1,90 @@
+name: Codex Self-Hosted Review
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+    contents: read
+    pull-requests: write
+
+concurrency:
+    group: codex-review-pr-${{ github.event.pull_request.number }}
+    cancel-in-progress: false
+
+jobs:
+    codex-review:
+        if: >-
+            github.event.pull_request.draft == false &&
+            github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: [self-hosted, chemflow]
+        timeout-minutes: 20
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Ensure Codex CLI is available
+              run: |
+                  source /home/tengcc/soft/miniconda3/etc/profile.d/conda.sh
+                  conda activate chemflow
+                  export PATH="/home/tengcc/.npm-global/bin:${PATH}"
+                  echo "PATH=${PATH}"
+                  echo "HOME=${HOME}"
+                  which codex
+                  codex --version
+                  codex review --help
+
+            - name: Ensure PR base branch is fetched
+              if: github.event_name == 'pull_request'
+              run: |
+                  git fetch --no-tags origin "${{ github.base_ref }}:${{ github.base_ref }}" || true
+
+            - name: Run Codex review
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  source /home/tengcc/soft/miniconda3/etc/profile.d/conda.sh
+                  conda activate chemflow
+                  export PATH="/home/tengcc/.npm-global/bin:${PATH}"
+
+                  codex review --base "${{ github.base_ref }}" > review.stdout 2> review.stderr
+
+                  if [ -s review.stdout ]; then
+                      cp review.stdout review.md
+                  else
+                      awk '
+                        BEGIN { capture = 0; block = "" }
+                        /^codex$/ { capture = 1; block = ""; next }
+                        capture { block = block $0 ORS }
+                        END { printf "%s", block }
+                      ' review.stderr > review.md
+                  fi
+
+                  if [ ! -s review.md ]; then
+                      {
+                          echo "Codex review produced no parseable output."
+                          echo
+                          echo "Stderr tail:"
+                          tail -n 120 review.stderr
+                      } > review.md
+                  fi
+
+            - name: Add job summary
+              run: |
+                  cat review.md >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Comment on PR
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const body = fs.readFileSync('review.md', 'utf8').slice(0, 65000);
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.issue.number,
+                        body
+                      });

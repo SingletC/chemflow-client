@@ -21,3 +21,20 @@ def test_ase_adapter_round_trip_preserves_core_fields():
     assert restored.get_pbc().tolist() == [True, False, False]
     assert restored.get_tags().tolist() == [1, 2]
     assert restored.get_masses().tolist() == [12.0, 16.0]
+
+
+def test_ase_adapter_preserves_cell_and_pbc_for_empty_workspace():
+    atoms = Atoms(
+        cell=[[8.0, 0.0, 0.0], [0.0, 9.0, 0.0], [0.0, 0.0, 10.0]],
+        pbc=[True, True, False],
+    )
+
+    payload = AseAtomsAdapter.to_payload(atoms)
+    restored = AseAtomsAdapter.from_payload(payload)
+
+    assert payload.symbols == []
+    assert payload.positions == []
+    assert payload.cell == [[8.0, 0.0, 0.0], [0.0, 9.0, 0.0], [0.0, 0.0, 10.0]]
+    assert payload.pbc == [True, True, False]
+    assert restored.get_cell().array.tolist() == [[8.0, 0.0, 0.0], [0.0, 9.0, 0.0], [0.0, 0.0, 10.0]]
+    assert restored.get_pbc().tolist() == [True, True, False]

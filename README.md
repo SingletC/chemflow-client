@@ -2,7 +2,7 @@
 
 Public Python client for ChemFlow 3D chat editing.
 
-Default public service URL: `https://chemcloud.info`
+Supported Python versions: 3.9+
 
 ## Install
 
@@ -16,7 +16,15 @@ Notebook widget support is optional:
 pip install "chemflow-client[notebook]"
 ```
 
-## One-shot Usage
+For contributors who want to run the full test suite:
+
+```bash
+pip install -e ".[dev,notebook]"
+```
+
+## Usage
+
+Blocking Python API:
 
 ```python
 from ase.build import molecule
@@ -26,44 +34,52 @@ atoms = molecule("H2O")
 updated_atoms, text = chat3d(
     atoms,
     "change the H-O-H angle to 110 degrees",
-    api_key="cfsk_xxx",
+)
+
+generated_atoms, text = chat3d(
+    atoms=None,
+    prompt="generate methane",
 )
 ```
 
-Override `base_url` only when targeting a self-hosted ChemFlow deployment.
+## JupyterLab
 
-## Stateful Usage
-
-```python
-from ase.build import molecule
-from chemflow_client import ChemFlow3DClient
-
-client = ChemFlow3DClient(
-    api_key="cfsk_xxx",
-)
-client.start(molecule("NH3"))
-
-atoms, text = client.chat("rotate one hydrogen slightly outward")
-atoms = client.undo()
-client.close()
-```
-
-## Notebook Widget
+Async notebook widget:
 
 ```python
-from IPython.display import display
-from ase.build import molecule
 from chemflow_client import Chat3DWidget
 
-widget = Chat3DWidget(
-    molecule("CH4"),
-    api_key="cfsk_xxx",
-)
-display(widget)
-
-latest_atoms = widget.get_atoms()
-selected_atoms = widget.get_selected_atom_indices()
+widget = Chat3DWidget()
+widget
 ```
 
-The widget is a cell output widget, not a full JupyterLab sidebar extension.
-Clicking atoms in the widget toggles selection with a light-yellow highlight similar to the web viewer.
+```python
+widget.get_atoms()
+```
+
+![JupyterLab widget demo](docs/assets/chemflow-widget-demo.gif)
+
+
+## Configure
+
+Create an API key at <https://chemflow.cloud/user-center/api-keys>.
+
+You can configure the client with environment variables:
+
+```bash
+export CHEMFLOW_API_KEY="cfsk_xxx"
+```
+
+You can also pass configuration as arguments to `chat3d(...)` or `Chat3DWidget(...)`:
+
+```python
+from chemflow_client import Chat3DWidget, chat3d
+
+updated_atoms, text = chat3d(
+    atoms=None,
+    prompt="generate methane",
+    api_key="cfsk_xxx",
+)
+
+widget = Chat3DWidget(api_key="cfsk_xxx")
+```
