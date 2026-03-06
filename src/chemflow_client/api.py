@@ -30,7 +30,7 @@ class ChemFlowApi:
             transport=transport,
             headers={
                 "X-ChemFlow-Api-Key": resolved_api_key,
-                "User-Agent": "chemflow-client/0.1.0",
+                "User-Agent": "chemflow-client/0.1.5",
                 "Accept": "application/json",
             },
         )

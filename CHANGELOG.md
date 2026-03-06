@@ -4,6 +4,28 @@ All notable changes to `chemflow-client` will be documented in this file.
 
 ## Unreleased
 
+## 0.1.5
+
+- Changed `chat3d(...)` to require `prompt` as a keyword argument and make `atoms` optional, so generation calls can use `chat3d(prompt="generate methane")`.
+- Simplified the README examples for `chat3d(...)` and documented the public call signatures in a dedicated section.
+
+## 0.1.4
+
+- Fixed the README notebook widget image for PyPI by switching from a GitHub `blob` page URL to the raw GIF URL pinned to the release tag.
+
+## 0.1.3
+
+- Updated the README notebook widget image to use the GitHub-hosted URL so the animation renders correctly on PyPI.
+- Simplified the notebook widget assistant placeholder text from `Thinking harder...` to `Thinking...`.
+
+## 0.1.2
+
+- Published the client and widget improvements that were previously tagged but not released to PyPI because of a package-version mismatch.
+- Improved `ChemFlow3DClient` request preparation and response application so notebook background chats can reuse the same state transitions safely.
+- Improved `Chat3DWidget` background chat handling to stay responsive and avoid applying results after the widget is closed.
+- Improved ASE payload conversion for generated or empty structures so optional arrays, cell data, and periodic boundary flags are preserved more consistently.
+- Expanded the public README examples for structure generation workflows and notebook usage.
+
 ## 0.1.0
 
 - Initial public release.

@@ -35,8 +35,8 @@ def test_chat3d_one_shot(monkeypatch):
 
     atoms = Atoms(symbols=["H", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]])
     updated_atoms, text = chat3d(
-        atoms,
-        "stretch the bond",
+        prompt="stretch the bond",
+        atoms=atoms,
         base_url="http://localhost:8000",
         api_key="cfsk_test_key",
     )
@@ -68,8 +68,7 @@ def test_chat3d_can_start_from_empty_workspace(monkeypatch):
     monkeypatch.setattr("chemflow_client.api.ChemFlowApi.chat3d", fake_chat3d)
 
     updated_atoms, text = chat3d(
-        None,
-        "generate methane",
+        prompt="generate methane",
         api_key="cfsk_test_key",
     )
 
@@ -217,8 +216,8 @@ def test_chat3d_can_use_environment_api_key(monkeypatch):
     monkeypatch.setattr("chemflow_client.api.ChemFlowApi.chat3d", fake_chat3d)
 
     atoms, text = chat3d(
-        Atoms(symbols=["He"], positions=[[0.0, 0.0, 0.0]]),
-        "leave it as is",
+        prompt="leave it as is",
+        atoms=Atoms(symbols=["He"], positions=[[0.0, 0.0, 0.0]]),
     )
 
     assert atoms.get_chemical_symbols() == ["He"]

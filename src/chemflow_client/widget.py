@@ -64,7 +64,7 @@ def _format_widget_error_message(error: Union[Exception, str]) -> str:
 
 _WIDGET_ESM = r'''
 const THREE_DMOL_URL = "https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js";
-const THINKING_PLACEHOLDER = "Thinking harder...";
+const THINKING_PLACEHOLDER = "Thinking...";
 
 async function ensure3Dmol() {
   if (window.$3Dmol) {
