@@ -122,9 +122,9 @@ class ChemFlow3DClient:
 
 
 def chat3d(
-    atoms: Optional[Atoms],
-    prompt: str,
     *,
+    prompt: str,
+    atoms: Optional[Atoms] = None,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,

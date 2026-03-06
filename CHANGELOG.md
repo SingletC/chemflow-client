@@ -4,6 +4,11 @@ All notable changes to `chemflow-client` will be documented in this file.
 
 ## Unreleased
 
+## 0.1.5
+
+- Changed `chat3d(...)` to require `prompt` as a keyword argument and make `atoms` optional, so generation calls can use `chat3d(prompt="generate methane")`.
+- Simplified the README examples for `chat3d(...)` and documented the public call signatures in a dedicated section.
+
 ## 0.1.4
 
 - Fixed the README notebook widget image for PyPI by switching from a GitHub `blob` page URL to the raw GIF URL pinned to the release tag.

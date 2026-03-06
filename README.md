@@ -32,14 +32,11 @@ from chemflow_client import chat3d
 
 atoms = molecule("H2O")
 updated_atoms, text = chat3d(
-    atoms,
-    "change the H-O-H angle to 110 degrees",
+    prompt="change the H-O-H angle to 110 degrees",
+    atoms=atoms,
 )
-
-generated_atoms, text = chat3d(
-    atoms=None,
-    prompt="generate methane",
-)
+# or generate one directly.
+generated_atoms, text = chat3d(prompt="generate methane")
 ```
 
 ## JupyterLab
@@ -57,7 +54,7 @@ widget
 widget.get_atoms()
 ```
 
-![JupyterLab widget demo](https://raw.githubusercontent.com/SingletC/chemflow-client/v0.1.4/docs/assets/chemflow-widget-demo.gif)
+![JupyterLab widget demo](https://raw.githubusercontent.com/SingletC/chemflow-client/v0.1.5/docs/assets/chemflow-widget-demo.gif)
 
 
 ## Configure
@@ -76,10 +73,47 @@ You can also pass configuration as arguments to `chat3d(...)` or `Chat3DWidget(.
 from chemflow_client import Chat3DWidget, chat3d
 
 updated_atoms, text = chat3d(
-    atoms=None,
     prompt="generate methane",
     api_key="cfsk_xxx",
 )
 
 widget = Chat3DWidget(api_key="cfsk_xxx")
 ```
+
+## Call Signatures
+
+### `chat3d(...)`
+
+```python
+chat3d(
+    *,
+    prompt: str,
+    atoms: Optional[Atoms] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    timeout: float = 300.0,
+) -> Tuple[Atoms, str]
+```
+
+- `prompt`: Required keyword-only editing or generation instruction.
+- `atoms`: Optional initial `ase.Atoms` structure.
+- `base_url`, `api_key`, `model`, `timeout`: Optional client configuration overrides.
+- Returns `(atoms, text)`.
+
+### `Chat3DWidget(...)`
+
+```python
+Chat3DWidget(
+    atoms: Optional[Atoms] = None,
+    *,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    timeout: float = 300.0,
+)
+```
+
+- `atoms`: Optional initial `ase.Atoms` structure.
+- `base_url`, `api_key`, `model`, `timeout`: Optional client configuration overrides.
+- Returns a notebook widget instance backed by `ChemFlow3DClient`.
