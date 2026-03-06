@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -20,7 +20,7 @@ class ChemFlowApi:
         base_url: str = DEFAULT_BASE_URL,
         api_key: str,
         timeout: float = 300.0,
-        transport: httpx.BaseTransport | None = None,
+        transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
         normalized_base_url = (base_url or "").strip().rstrip("/")
         if not normalized_base_url:

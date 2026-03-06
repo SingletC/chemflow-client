@@ -3,6 +3,7 @@
 Public Python client for ChemFlow 3D chat editing.
 
 Default public service URL: `https://chemcloud.info`
+Supported Python versions: 3.9+
 
 ## Install
 

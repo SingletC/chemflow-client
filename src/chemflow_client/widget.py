@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from typing import Optional, Tuple, Union
 
 from ase import Atoms
 
@@ -46,7 +47,7 @@ def _toggle_selected_atom_index(values: list[int], atom_index: int, max_atoms: i
     return [*normalized, atom_index]
 
 
-def _format_widget_error_message(error: Exception | str) -> str:
+def _format_widget_error_message(error: Union[Exception, str]) -> str:
     if isinstance(error, str):
         message = error
     elif isinstance(error, ChemFlowError):
@@ -421,13 +422,13 @@ else:
             *,
             base_url: str = DEFAULT_BASE_URL,
             api_key: str,
-            model: str | None = None,
+            model: Optional[str] = None,
             timeout: float = 300.0,
         ) -> None:
             super().__init__()
             self._client_lock = threading.RLock()
             self._main_thread = threading.current_thread()
-            self._worker_thread: threading.Thread | None = None
+            self._worker_thread: Optional[threading.Thread] = None
             self._closed = False
             try:
                 self._main_loop = asyncio.get_running_loop()
@@ -497,7 +498,7 @@ else:
 
         def _set_error_state(
             self,
-            error: Exception | str,
+            error: Union[Exception, str],
             *,
             append_message: bool = True,
             clear_busy: bool = True,
@@ -619,7 +620,7 @@ else:
             except Exception as exc:
                 self._set_error_state(exc)
 
-        def chat(self, prompt: str, *, raise_errors: bool = False) -> tuple[Atoms, str]:
+        def chat(self, prompt: str, *, raise_errors: bool = False) -> Tuple[Atoms, str]:
             normalized_prompt = (prompt or "").strip()
             if not normalized_prompt:
                 message = self._set_error_state("prompt is required", append_message=False, clear_busy=False)

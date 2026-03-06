@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from ase import Atoms
 
@@ -21,7 +21,7 @@ class ChemFlow3DClient:
         *,
         base_url: str = DEFAULT_BASE_URL,
         api_key: str,
-        model: str | None = None,
+        model: Optional[str] = None,
         timeout: float = 300.0,
     ) -> None:
         self._api = ChemFlowApi(base_url=base_url, api_key=api_key, timeout=timeout)
@@ -50,7 +50,7 @@ class ChemFlow3DClient:
         self._atoms = AseAtomsAdapter.copy_atoms(atoms)
         self._needs_sync = True
 
-    def chat(self, prompt: str) -> tuple[Atoms, str]:
+    def chat(self, prompt: str) -> Tuple[Atoms, str]:
         if self._atoms is None:
             raise ChemFlowStateError("No structure has been loaded. Call start(atoms) first.")
         normalized_prompt = (prompt or "").strip()
@@ -108,9 +108,9 @@ def chat3d(
     *,
     base_url: str = DEFAULT_BASE_URL,
     api_key: str,
-    model: str | None = None,
+    model: Optional[str] = None,
     timeout: float = 300.0,
-) -> tuple[Atoms, str]:
+) -> Tuple[Atoms, str]:
     """Run a one-shot 3D chat edit and return updated atoms plus assistant text."""
     with ChemFlow3DClient(
         base_url=base_url,
