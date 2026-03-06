@@ -68,7 +68,6 @@ You can configure the client with environment variables:
 
 ```bash
 export CHEMFLOW_API_KEY="cfsk_xxx"
-export CHEMFLOW_BASE_URL="http://localhost:8000"  # optional
 ```
 
 You can also pass configuration as arguments to `chat3d(...)` or `Chat3DWidget(...)`:
