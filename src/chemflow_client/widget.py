@@ -207,7 +207,8 @@ function render({ model, el }) {
         .cf-role { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; margin-bottom: 4px; }
         .cf-text { white-space: pre-wrap; line-height: 1.4; }
         .cf-form { display: flex; gap: 10px; padding: 14px; border-top: 1px solid #d8ccb7; background: rgba(255,255,255,0.62); }
-        .cf-input { flex: 1; border: 1px solid #b8aa91; border-radius: 10px; padding: 10px 12px; background: #fffdf8; }
+        .cf-input { flex: 1; border: 1px solid #b8aa91; border-radius: 10px; padding: 10px 12px; background: #fffdf8; color: #192126; caret-color: #192126; -webkit-text-fill-color: #192126; font: inherit; }
+        .cf-input::placeholder { color: #6f6453; opacity: 1; -webkit-text-fill-color: #6f6453; }
         .cf-button { border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; background: #1d5c63; color: white; }
         .cf-button:disabled, .cf-input:disabled { cursor: default; opacity: 0.6; }
         .cf-button-secondary { background: #8c6b3f; }
