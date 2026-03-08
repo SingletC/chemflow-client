@@ -4,6 +4,10 @@ All notable changes to `chemflow-client` will be documented in this file.
 
 ## Unreleased
 
+## 0.1.7
+
+- Fixed the notebook widget chat input so typed text and the caret stay visible under custom Jupyter themes before the prompt is submitted.
+
 ## 0.1.5
 
 - Changed `chat3d(...)` to require `prompt` as a keyword argument and make `atoms` optional, so generation calls can use `chat3d(prompt="generate methane")`.
